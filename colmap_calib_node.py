@@ -28,7 +28,7 @@ class colmap:
 	def __del__(self):
 		self.flag_calib = False
 
-	def Image_graber(self,data):
+	def Image_graber(self,data):#
 		self.CreateDirIfnotExist(self.image_path)
 
 		try:
