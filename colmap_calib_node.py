@@ -5,9 +5,11 @@ import os.path
 import imghdr
 import cv2
 import threading
+import math
 from sensor_msgs.msg import Image
 from sensor_msgs.msg import NavSatFix
 from geometry_msgs.msg import TwistStamped
+from tf.msg import tfMessage
 from cv_bridge import CvBridge, CvBridgeError
 
 class colmap:
@@ -16,14 +18,13 @@ class colmap:
 		self.bridge = CvBridge()
 		self.image_count = 0
 		self.image_path = "./tmp/images"
-		self.pre_sec = -1
-		self.pre_nsec = -1
-		self.x_distance = 0
-		self.image_save_distance = 2.0
 		self.calib_image_num = 100
 		self.flag_calib = False
+		self.snap_distance = 3 * 3
+		self.snap_rot = 2
+		self.snap_point = (0.0,0.0,0.0,0)
 		rospy.Subscriber("/kitti/camera_color_left/image_raw", Image, self.Image_graber)
-		rospy.Subscriber("/kitti/oxts/gps/vel", TwistStamped, self.vel_callback)
+		rospy.Subscriber("/tf", tfMessage, self.Tf_callback)
 
 	def __del__(self):
 		self.flag_calib = False
@@ -37,22 +38,26 @@ class colmap:
 			print(e)
 
 		self.Calib_Check()
+ 
+	def Tf_callback(self,tf):
+		rot = tf.transforms[0].transform.rotation
+		x = rot.x*rot.x - rot.y*rot.y - rot.z*rot.z + rot.w*rot.w
+		y = 2*(rot.x*rot.y+rot.z*rot.w)
+		self.theta = math.atan2(y,x)*180.0/math.pi
+		self.pos = tf.transforms[0].transform.translation
 
-	def vel_callback(self,vel):
-		if self.pre_sec<0:
-			self.x_distance = 0
-		else:
-			dt = vel.header.stamp.secs-self.pre_sec + (vel.header.stamp.nsecs - self.pre_nsec)*0.000000001
-			if dt < 0:
-				dt = 0
-			self.x_distance += vel.twist.linear.x * dt
-		self.pre_sec = vel.header.stamp.secs
-		self.pre_nsec = vel.header.stamp.nsecs
+		if self.flag_calib:
+			self.snap_point = (self.pos.x,self.pos.y,self.pos.z, self.theta)
 
 	def Calib_Check(self):
 		if not self.flag_calib:
-			if self.x_distance > self.image_save_distance:
-				self.x_distance = 0
+			displace = (self.pos.x - self.snap_point[0]) * (self.pos.x - self.snap_point[0]) + (self.pos.y - self.snap_point[1]) * (self.pos.y - self.snap_point[1]) + (self.pos.z - self.snap_point[2]) * (self.pos.z - self.snap_point[2])
+
+			rot = abs(self.theta-self.snap_point[3])
+			
+
+			if (displace > self.snap_distance) or (rot > self.snap_rot):
+				self.snap_point = (self.pos.x,self.pos.y,self.pos.z, self.theta)
 				image_name = self.image_path + "/" + str(self.image_count)+".jpg"
 				self.image_count += 1
 				cv2.imwrite(image_name, self.cv_image)
@@ -65,21 +70,19 @@ class colmap:
 				cv2.destroyAllWindows()
 				th = threading.Thread(target=self.CameraCalib())
 				th.start()
-				self.x_distance = 0
-		else:
-			self.x_distance = 0
-				
 
 	def CameraCalib(self):
 		if self.Sparse_reconstruction():
+			rm_cmd = "rm -rf ./model/*"
+			subprocess.call(rm_cmd, shell = True)
 			self.CreateDirIfnotExist("./model")
-			txt_cmd = "rm -rf ./model/* ; colmap model_converter --input_path ./tmp/sparse/0 --output_path ./model --output_type 'TXT'"
+			txt_cmd = "colmap model_converter --input_path ./tmp/sparse/0 --output_path ./model --output_type 'TXT'"
 			subprocess.call(txt_cmd, shell = True)
 			print("Success : CameraCalib")
 		else:
 			print("Failure : CameraCalib")
 			self.calib_image_num += 10
-			print("Modify : Distance = "+str(self.image_save_distance)+" , Image num = "+str(self.calib_image_num))
+			print("Modify : Distance = "+str(self.snap_distance)+" , Image num = "+str(self.calib_image_num))
 
 		subprocess.call("rm -rf "+self.image_path+"/*", shell = True)
 		self.image_count = 0
@@ -132,19 +135,8 @@ class colmap:
 			return False
 		else:
 			return True
-#		else:
-#			for file in os.listdir(self.image_path):
-#				if imghdr.what(self.image_path+"/"+file) != None:
-#					image_cnt +=1
-
-#			if image_cnt >= self.calib_image_num:		
-#				return True
-#			else:
-#				print("Insufficient image files")
-#				return False
 
 if __name__ == '__main__':
 	rospy.init_node('colmap_calib_node', anonymous=True)
 	colmap = colmap()
-	#colmap.CameraCalib()
 	rospy.spin()
