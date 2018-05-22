@@ -1,0 +1,7 @@
+camera_model: OPENCV
+image_width: 1242
+image_height: 375
+camera_matrix:
+[ 726.146 0.0 621 0.0 732.798 187.5 0.0 0.0 1.0 ]
+distortion_coefficients:
+[ 0.03072 -0.0101926 0.00354764 ]

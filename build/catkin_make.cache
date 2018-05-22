@@ -1,0 +1,2 @@
+colmap
+-DCATKIN_DEVEL_PREFIX=/home/tier4-t-iwai/program/colmap_sfm/devel -DCMAKE_INSTALL_PREFIX=/home/tier4-t-iwai/program/colmap_sfm/install -G Unix Makefiles

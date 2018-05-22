@@ -1,0 +1,8 @@
+prefix=/home/tier4-t-iwai/program/colmap_sfm/install
+
+Name: colmap
+Description: Description of colmap
+Version: 0.0.0
+Cflags: 
+Libs: -L/home/tier4-t-iwai/program/colmap_sfm/install/lib 
+Requires: 
