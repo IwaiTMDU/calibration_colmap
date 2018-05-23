@@ -95,8 +95,9 @@ class colmap:
 	def WriteIntrinsics(self):
 		with open(self.model_path + "/cameras.txt") as cf:
 			cfstr = cf.readlines()
-			intr = cfstr[3].split(" ")[:-1]
+			intr = cfstr[3].split(" ")
 			self.CreateDirIfnotExist(self.yml_path) 
+			print(intr)
 			yaml_content = ("camera_model: " + intr[1] + "\n"
 							+ "image_width: " + intr[2] + "\n"
 							+ "image_height: " + intr[3] + "\n"
@@ -163,4 +164,5 @@ class colmap:
 if __name__ == '__main__':
 	rospy.init_node('colmap_calib_node', anonymous=True)
 	colmap = colmap()
+	colmap.WriteIntrinsics()
 	rospy.spin()
