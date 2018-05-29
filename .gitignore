@@ -2,4 +2,6 @@
 *.jpg
 tmp
 yml
+.catkin_workspace
+.gitignore
 

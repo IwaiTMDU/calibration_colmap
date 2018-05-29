@@ -11,6 +11,7 @@ from sensor_msgs.msg import Image
 from sensor_msgs.msg import NavSatFix
 from geometry_msgs.msg import TwistStamped
 from tf.msg import tfMessage
+import tf
 from geometry_msgs.msg import Vector3
 from geometry_msgs.msg import Quaternion
 from cv_bridge import CvBridge, CvBridgeError
@@ -35,6 +36,21 @@ class colmap:
 		rospy.Subscriber("/kitti/camera_color_left/image_raw", Image, self.Image_graber)
 		rospy.Subscriber("/tf", tfMessage, self.Tf_callback)
 
+	def CheckColmapInstallation(self):
+		cmd = "colmap -h"
+		try:
+			res = subprocess.check_output(cmd.split())
+			if (res.split())[0] == "COLMAP":
+				print("colmap : OK")
+
+			else:
+				print("Error : Cannot find colmap")
+				exit()
+
+		except subprocess.CalledProcessError as e:
+			print("Cannot call unix command")
+			print(e)
+
 	def Image_graber(self,image):#
 		self.CreateDirIfnotExist(self.image_path)
 
@@ -45,27 +61,32 @@ class colmap:
 
 		self.Calib_Check()
  
-	def Tf_callback(self,tf):
-		self.rot = tf.transforms[0].transform.rotation
-		self.pos = tf.transforms[0].transform.translation
+	def Tf_callback(self,_tf):
+		self.rot = _tf.transforms[0].transform.rotation
+		self.pos = _tf.transforms[0].transform.translation
 
 	def Calib_Check(self):
 		if not self.flag_calib:
 			displace = math.sqrt((self.pos.x - self.snap_point[0].x) * (self.pos.x - self.snap_point[0].x) + (self.pos.y - self.snap_point[0].y) * (self.pos.y - self.snap_point[0].y) + (self.pos.z - self.snap_point[0].z) * (self.pos.z - self.snap_point[0].z))
 
-			x = self.rot.x*self.rot.x - self.rot.y*self.rot.y - self.rot.z*self.rot.z + self.rot.w*self.rot.w
-			y = 2*(self.rot.x*self.rot.y+self.rot.z*self.rot.w)
-			theta = math.atan2(y,x)*180.0/math.pi
-			abstheta = abs(theta-self.snap_point[1])
+			#x = self.rot.x*self.rot.x - self.rot.y*self.rot.y - self.rot.z*self.rot.z + self.rot.w*self.rot.w
+			#y = 2*(self.rot.x*self.rot.y+self.rot.z*self.rot.w)
+			#theta = math.atan2(y,x)*180.0/math.pi
+			#abstheta = abs(theta-self.snap_point[1])
+
+			quaternion = (self.rot.x, self.rot.y, self.rot.z, self.rot.w)
+			euler = tf.transformations.euler_from_quaternion(quaternion)
+			print("tf:::"+str(euler[2]*180.0/math.pi))
+			print("theta:::"+str(theta)+"\n")
 
 			if (displace > self.snap_distance) or (abstheta > self.snap_rot):
-				self.snap_point = (self.pos,theta)
+				self.snap_point = (self.pos,euler[2])
 				image_name = self.image_path + "/" + str(self.image_count)+".jpg"
 				self.image_count += 1
 				cv2.imwrite(image_name, self.cv_image)
 				cv2.imshow('Image',self.cv_image)
 				cv2.waitKey(1)
-				print("Save Image : "+image_name)
+				#print("Save Image : "+image_name)
 		
 			if self.image_count > self.calib_image_num:
 				self.flag_calib = True
@@ -164,5 +185,5 @@ class colmap:
 if __name__ == '__main__':
 	rospy.init_node('colmap_calib_node', anonymous=True)
 	colmap = colmap()
-	colmap.WriteIntrinsics()
+	colmap.CheckColmapInstallation()
 	rospy.spin()
