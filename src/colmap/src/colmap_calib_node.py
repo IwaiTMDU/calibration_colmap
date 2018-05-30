@@ -7,6 +7,7 @@ import cv2
 import threading
 import math
 import yaml
+import numpy as np
 from sensor_msgs.msg import Image
 from sensor_msgs.msg import NavSatFix
 from geometry_msgs.msg import TwistStamped
@@ -23,18 +24,20 @@ class colmap:
 		self.model_path = "./tmp/model"
 		self.yml_path = "./yml"
 		self.filename_yml = "camera_param.yml"
-		self.calib_image_num = 100
-		self.snap_distance = 3
+		self.calib_image_num = 80
+		self.snap_distance = 2
 		self.snap_rot = 3
 
 		self.bridge = CvBridge()
 		self.image_count = 0
 		self.flag_calib = False
-		self.pos = Vector3(0.0, 0.0, 0.0)
-		self.rot = Quaternion(0.0, 0.0, 1.0, 0.0)
-		self.snap_point = (self.pos,0.0)
+		self.snap_point = [np.array([0,0,0]),0]
+		self.distance = 0.0
+		self.yaw = 0.0
+		self.rot = 0.0
 		rospy.Subscriber("/kitti/camera_color_left/image_raw", Image, self.Image_graber)
-		rospy.Subscriber("/tf", tfMessage, self.Tf_callback)
+		th = threading.Thread(target=self.Tf_thread)
+		th.start()
 
 	def CheckColmapInstallation(self):
 		cmd = "colmap -h"
@@ -58,41 +61,56 @@ class colmap:
 			self.cv_image = self.bridge.imgmsg_to_cv2(image,"bgr8")
 		except CvBridgeError as e:
 			print(e)
-
-		self.Calib_Check()
  
-	def Tf_callback(self,_tf):
-		self.rot = _tf.transforms[0].transform.rotation
-		self.pos = _tf.transforms[0].transform.translation
+	def Tf_thread(self):
+		listener = tf.TransformListener()
+		now = rospy.Time(0)
+		listener.waitForTransform("/world", "/base_link", rospy.Time(0), rospy.Duration(10.0))
+
+		(trans,rot) = listener.lookupTransform("/world", "/base_link", now)
+		euler = tf.transformations.euler_from_quaternion(rot)
+		self.snap_point[0] = np.array(trans)
+		self.snap_point[1] = euler[2]*180.0/math.pi
+
+		while not rospy.is_shutdown():
+			try:
+				now = rospy.Time(0)
+				listener.waitForTransform("/world", "/base_link", now, rospy.Duration(10.0))
+				(self.trans,self.rot) = listener.lookupTransform("/world", "/base_link", now)
+				self.yaw = (tf.transformations.euler_from_quaternion(self.rot))[2]*180.0/math.pi
+				self.rot = abs(self.yaw-self.snap_point[1])
+				self.distance = np.linalg.norm(np.array(self.trans)-self.snap_point[0])
+				self.Calib_Check()
+			except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
+				continue
 
 	def Calib_Check(self):
 		if not self.flag_calib:
-			displace = math.sqrt((self.pos.x - self.snap_point[0].x) * (self.pos.x - self.snap_point[0].x) + (self.pos.y - self.snap_point[0].y) * (self.pos.y - self.snap_point[0].y) + (self.pos.z - self.snap_point[0].z) * (self.pos.z - self.snap_point[0].z))
-
-			#x = self.rot.x*self.rot.x - self.rot.y*self.rot.y - self.rot.z*self.rot.z + self.rot.w*self.rot.w
-			#y = 2*(self.rot.x*self.rot.y+self.rot.z*self.rot.w)
-			#theta = math.atan2(y,x)*180.0/math.pi
-			#abstheta = abs(theta-self.snap_point[1])
-
-			quaternion = (self.rot.x, self.rot.y, self.rot.z, self.rot.w)
-			euler = tf.transformations.euler_from_quaternion(quaternion)
-			print("tf:::"+str(euler[2]*180.0/math.pi))
+			'''
+			#displace = math.sqrt((self.pos.x - self.snap_point[0].x) * (self.pos.x - self.snap_point[0].x) + (self.pos.y - self.snap_point[0].y) * (self.pos.y - self.snap_point[0].y) + (self.pos.z - self.snap_point[0].z) * (self.pos.z - self.snap_point[0].z))
+			
+			x = self.rot.x*self.rot.x - self.rot.y*self.rot.y - self.rot.z*self.rot.z + self.rot.w*self.rot.w
+			y = 2*(self.rot.x*self.rot.y+self.rot.z*self.rot.w)
+			theta = math.atan2(y,x)*180.0/math.pi
+			abstheta = abs(theta-self.snap_point[1])
 			print("theta:::"+str(theta)+"\n")
-
-			if (displace > self.snap_distance) or (abstheta > self.snap_rot):
-				self.snap_point = (self.pos,euler[2])
+			'''
+			
+			if (self.distance > self.snap_distance) or (self.yaw > self.snap_rot):
+				self.snap_point = (np.array(self.trans),self.yaw)
 				image_name = self.image_path + "/" + str(self.image_count)+".jpg"
 				self.image_count += 1
 				cv2.imwrite(image_name, self.cv_image)
 				cv2.imshow('Image',self.cv_image)
 				cv2.waitKey(1)
-				#print("Save Image : "+image_name)
+				print("Save Image : "+image_name)
 		
 			if self.image_count > self.calib_image_num:
 				self.flag_calib = True
 				cv2.destroyAllWindows()
 				th = threading.Thread(target=self.CameraCalib())
 				th.start()
+			
 
 	def CameraCalib(self):
 		if self.Sparse_reconstruction():
@@ -187,3 +205,4 @@ if __name__ == '__main__':
 	colmap = colmap()
 	colmap.CheckColmapInstallation()
 	rospy.spin()
+
