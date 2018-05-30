@@ -8,6 +8,7 @@ import threading
 import math
 import yaml
 import numpy as np
+import re
 from sensor_msgs.msg import Image
 from sensor_msgs.msg import NavSatFix
 from geometry_msgs.msg import TwistStamped
@@ -134,23 +135,18 @@ class colmap:
 	def WriteIntrinsics(self):
 		with open(self.model_path + "/cameras.txt") as cf:
 			cfstr = cf.readlines()
-			intr = cfstr[3].split(" ")
+			#intr = cfstr[3].split(" ")
+			intr = re.split('[ \n]',cfstr[3])[:-1]
 			self.CreateDirIfnotExist(self.yml_path) 
-			print(intr)
-			yaml_content = ("camera_model: " + intr[1] + "\n"
-							+ "image_width: " + intr[2] + "\n"
-							+ "image_height: " + intr[3] + "\n"
-							+ "camera_matrix:\n"
-							+ "[ " + intr[4] + " 0.0 " + intr[6] + " 0.0 " + intr[5] + " " + intr[7] 						+ " 0.0 0.0 1.0 ]\n"
-							+ "distortion_coefficients:\n"
-							+ "[ " + " ".join(intr[8:]) + " ]\n")
+
+			yaml_content = {'camera_model': intr[1], 'image_width': float(intr[2]), 'image_height': float(intr[3]), 'fx': float(intr[4]), 'fy': float(intr[5]), 'cx': float(intr[6]), 'cy': float(intr[7]), 'distortion_coefficients': list(map(lambda value:float(value), intr[8:]))}
 			print(yaml_content)
-			#yaml_data = yaml.dump(yaml_content, default_flow_style=False)
+
 			with open(self.yml_path + "/" + self.filename_yml, "wt") as fp:
 				if fp is None:
 					print(self.yaml_path + "/" + self.filename_yml+ "No such file or directry")
 				else:
-					fp.write(yaml_content)
+					yaml.dump(yaml_content, fp)
 					print("Output : ./yml/camera_param.yml")
 
 	def Sparse_reconstruction(self):
@@ -204,5 +200,6 @@ if __name__ == '__main__':
 	rospy.init_node('colmap_calib_node', anonymous=True)
 	colmap = colmap()
 	colmap.CheckColmapInstallation()
+	colmap.WriteIntrinsics()
 	rospy.spin()
 
