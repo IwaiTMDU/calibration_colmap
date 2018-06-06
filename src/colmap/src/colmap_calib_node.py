@@ -12,7 +12,8 @@ import re
 from sensor_msgs.msg import Image
 from sensor_msgs.msg import NavSatFix
 from geometry_msgs.msg import TwistStamped
-from tf.msg import tfMessage
+#from tf.msg import tfMessage
+from collections import OrderedDict
 import tf
 from geometry_msgs.msg import Vector3
 from geometry_msgs.msg import Quaternion
@@ -49,7 +50,6 @@ class colmap:
 
 			else:
 				print("Error : Cannot find colmap")
-				exit()
 
 		except subprocess.CalledProcessError as e:
 			print("Cannot call unix command")
@@ -87,15 +87,6 @@ class colmap:
 
 	def Calib_Check(self):
 		if not self.flag_calib:
-			'''
-			#displace = math.sqrt((self.pos.x - self.snap_point[0].x) * (self.pos.x - self.snap_point[0].x) + (self.pos.y - self.snap_point[0].y) * (self.pos.y - self.snap_point[0].y) + (self.pos.z - self.snap_point[0].z) * (self.pos.z - self.snap_point[0].z))
-			
-			x = self.rot.x*self.rot.x - self.rot.y*self.rot.y - self.rot.z*self.rot.z + self.rot.w*self.rot.w
-			y = 2*(self.rot.x*self.rot.y+self.rot.z*self.rot.w)
-			theta = math.atan2(y,x)*180.0/math.pi
-			abstheta = abs(theta-self.snap_point[1])
-			print("theta:::"+str(theta)+"\n")
-			'''
 			
 			if (self.distance > self.snap_distance) or (self.yaw > self.snap_rot):
 				self.snap_point = (np.array(self.trans),self.yaw)
@@ -137,16 +128,28 @@ class colmap:
 			cfstr = cf.readlines()
 			#intr = cfstr[3].split(" ")
 			intr = re.split('[ \n]',cfstr[3])[:-1]
-			self.CreateDirIfnotExist(self.yml_path) 
+			self.CreateDirIfnotExist(self.yml_path)
 
-			yaml_content = {'camera_model': intr[1], 'image_width': float(intr[2]), 'image_height': float(intr[3]), 'fx': float(intr[4]), 'fy': float(intr[5]), 'cx': float(intr[6]), 'cy': float(intr[7]), 'distortion_coefficients': list(map(lambda value:float(value), intr[8:]))}
+			CameraMat = [float(intr[4]), 0., float(intr[6]), 0., float(intr[5]), float(intr[7]), 0., 0., 1.]
+			DistCoeff = list(map(lambda value:float(value), intr[8:]))
+			extrinsicMat = [1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.]
+			yaml_content = OrderedDict()
+
+			yaml_content['CameraExtrinsicMat'] = OrderedDict([('rows',4), ('cols',4), ('dt','d'), ('data',extrinsicMat)])
+			yaml_content['CameraMat'] = OrderedDict([('rows',3), ('cols',3), ('dt','d'), ('data',CameraMat)])
+			yaml_content['DistCoeff'] = OrderedDict([('rows',1), ('cols',4), ('dt','d'), ('data',DistCoeff)])
+			yaml_content['ImageSize'] = [int(intr[2]), int(intr[3])]
+			yaml_content['ReprojectionError'] = 0.0
+
+			#yaml_content = {'CameraExtrinsicMat':CameraExtrinsicMat, 'camera_model': intr[1], 'image_width': float(intr[2]), 'image_height': float(intr[3]), 'fx': float(intr[4]), 'fy': float(intr[5]), 'cx': float(intr[6]), 'cy': float(intr[7]), 'distortion_coefficients': list(map(lambda value:float(value), intr[8:]))}
 			print(yaml_content)
 
 			with open(self.yml_path + "/" + self.filename_yml, "wt") as fp:
 				if fp is None:
-					print(self.yaml_path + "/" + self.filename_yml+ "No such file or directry")
+					print(self.yml_path + "/" + self.filename_yml+ "No such file or directry")
 				else:
-					yaml.dump(yaml_content, fp)
+					yaml.add_representer(OrderedDict, lambda dumper,instance: dumper.represent_mapping('tag:yaml.org,2002:map', instance.items()))
+					yaml.dump(yaml_content, fp, version=(1.0,0.0))
 					print("Output : ./yml/camera_param.yml")
 
 	def Sparse_reconstruction(self):
