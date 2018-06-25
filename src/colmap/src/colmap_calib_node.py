@@ -205,6 +205,6 @@ if __name__ == '__main__':
 	rospy.init_node('colmap_calib_node', anonymous=True)
 	colmap = colmap()
 	colmap.CheckColmapInstallation()
-	colmap.WriteIntrinsics()
+	#colmap.WriteIntrinsics()
 	rospy.spin()
 
