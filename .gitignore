@@ -1,8 +1,0 @@
-*.db
-*.jpg
-tmp
-.catkin_workspace
-.gitignore
-
-calib160905.yaml
-.gitignore
