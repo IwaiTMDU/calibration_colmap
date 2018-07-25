@@ -22,24 +22,32 @@ from cv_bridge import CvBridge, CvBridgeError
 class colmap:
 
 	def __init__(self):
-		self.image_path = "./tmp/images"
-		self.model_path = "./tmp/model"
-		self.yml_path = "./yml"
-		self.filename_yml = "camera_param.yml"
-		self.calib_image_num = 80
+		self.group_path = "./colmap/tmp/group"
+		self.yml_path = "./colmap/yml"
+		self.filename_yml = "camera_param"
+		self.dense = False
+		
+		self.image_group = 0
+		self.max_group =1
+		self.calib_image_num = 100
 		self.snap_distance = 2
-		self.snap_rot = 3
+		self.snap_rot = 5
 
 		self.bridge = CvBridge()
 		self.image_count = 0
-		self.flag_calib = False
 		self.snap_point = [np.array([0,0,0]),0]
 		self.distance = 0.0
 		self.yaw = 0.0
 		self.rot = 0.0
-		rospy.Subscriber("/kitti/camera_color_left/image_raw", Image, self.Image_graber)
-		th = threading.Thread(target=self.Tf_thread)
-		th.start()
+		self.cv_image = None
+		self.image_sub = rospy.Subscriber("/image_raw", Image, self.Image_graber)
+		self.CreateDirIfnotExist("./colmap")
+		self.CreateDirIfnotExist("./colmap/tmp")
+		subprocess.call("rm -rf "+"./colmap/tmp/*", shell = True)
+		self.listener = tf.TransformListener()
+		self.flag_calibcheck = True
+		self.tf_th = threading.Thread(target=self.Tf_thread)
+		self.tf_th.start()
 
 	def CheckColmapInstallation(self):
 		cmd = "colmap -h"
@@ -55,90 +63,100 @@ class colmap:
 			print("Cannot call unix command")
 			print(e)
 
-	def Image_graber(self,image):#
-		self.CreateDirIfnotExist(self.image_path)
-
+	def Image_graber(self,image):
 		try:
 			self.cv_image = self.bridge.imgmsg_to_cv2(image,"bgr8")
 		except CvBridgeError as e:
 			print(e)
  
 	def Tf_thread(self):
-		listener = tf.TransformListener()
-		now = rospy.Time(0)
-		listener.waitForTransform("/world", "/base_link", rospy.Time(0), rospy.Duration(10.0))
+		initial = False;
 
-		(trans,rot) = listener.lookupTransform("/world", "/base_link", now)
-		euler = tf.transformations.euler_from_quaternion(rot)
-		self.snap_point[0] = np.array(trans)
-		self.snap_point[1] = euler[2]*180.0/math.pi
-
-		while not rospy.is_shutdown():
+		while not rospy.is_shutdown() and self.flag_calibcheck:
 			try:
-				now = rospy.Time(0)
-				listener.waitForTransform("/world", "/base_link", now, rospy.Duration(10.0))
-				(self.trans,self.rot) = listener.lookupTransform("/world", "/base_link", now)
-				self.yaw = (tf.transformations.euler_from_quaternion(self.rot))[2]*180.0/math.pi
-				self.rot = abs(self.yaw-self.snap_point[1])
-				self.distance = np.linalg.norm(np.array(self.trans)-self.snap_point[0])
-				self.Calib_Check()
+				(self.trans,self.rot) = self.listener.lookupTransform("/world", "/base_link", rospy.Time(0))
+
+				if not initial:
+					euler = tf.transformations.euler_from_quaternion(self.rot)
+					self.snap_point[0] = np.array(self.trans)
+					self.snap_point[1] = euler[2]*180.0/math.pi
+					initial = True
+				else:
+					self.yaw = (tf.transformations.euler_from_quaternion(self.rot))[2]*180.0/math.pi
+					self.rot = abs(self.yaw-self.snap_point[1])
+					self.distance = np.linalg.norm(np.array(self.trans)-self.snap_point[0])
+					self.Calib_Check()
 			except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
 				continue
 
 	def Calib_Check(self):
-		if not self.flag_calib:
-			
-			if (self.distance > self.snap_distance) or (self.yaw > self.snap_rot):
-				self.snap_point = (np.array(self.trans),self.yaw)
-				image_name = self.image_path + "/" + str(self.image_count)+".jpg"
-				self.image_count += 1
+		if (self.distance > self.snap_distance) or (self.rot > self.snap_rot):
+			self.snap_point = (np.array(self.trans),self.yaw)
+			self.image_count += 1
+			if self.cv_image is not None:
+				group_path = self.group_path+str(self.image_group)
+				self.CreateDirIfnotExist(group_path)
+				self.CreateDirIfnotExist(group_path+"/images")
+				image_name = group_path+"/images/" + str(self.image_count)+".jpg"
 				cv2.imwrite(image_name, self.cv_image)
 				cv2.imshow('Image',self.cv_image)
 				cv2.waitKey(1)
 				print("Save Image : "+image_name)
 		
-			if self.image_count > self.calib_image_num:
-				self.flag_calib = True
+		if self.image_count > self.calib_image_num:
+			th = threading.Thread(target=self.CameraCalib, args=(self.group_path+str(self.image_group), self.image_group,))
+			th.start()
+			self.image_group += 1
+			initial = False
+			self.image_count = 0
+			if self.image_group == self.max_group:
 				cv2.destroyAllWindows()
-				th = threading.Thread(target=self.CameraCalib())
-				th.start()
+				self.flag_calibcheck = False
+				self.image_sub.shutdown()
 			
 
-	def CameraCalib(self):
-		if self.Sparse_reconstruction():
-			self.CreateDirIfnotExist(self.model_path)
-			rm_cmd = "rm -rf " + self.model_path + "/*"
+	def CameraCalib(self, _group_path, _group):
+		subprocess.call("rm -rf "+_group_path+"/*.db ; rm -rfd "+_group_path+"/sparse/*", shell = True)
+
+		if self.Sparse_reconstruction(_group_path = _group_path):
+			_sparse_path = _group_path+"/sparse/0"
+			_model_path = _group_path + "/model"
+			self.CreateDirIfnotExist(_model_path)
+			rm_cmd = "rm -rf " + _model_path + "/*"
 			subprocess.call(rm_cmd, shell = True)
-			txt_cmd = "colmap model_converter --input_path ./tmp/sparse/0 --output_type 'TXT' --output_path " + self.model_path
+			txt_cmd = "colmap model_converter --input_path "+_sparse_path+" --output_type 'TXT' --output_path " + _model_path
 			subprocess.call(txt_cmd, shell = True)
-			self.WriteIntrinsics()
+			self.WriteIntrinsics(_group_path = _group_path, _group = _group)
 
 			print("Success : CameraCalib")
+			if self.dense:
+				self.Dense_reconstruction(_group_path = _group_path)
+				print("Carried out : Dense reconstruction")
+
 		else:
 			print("Failure : CameraCalib")
 			self.calib_image_num += 10
 			print("Modify : Distance = "+str(self.snap_distance)+" , Image num = "+str(self.calib_image_num))
 
-		subprocess.call("rm -rf "+self.image_path+"/*", shell = True)
-		self.image_count = 0
-		self.flag_calib = False
-
-	def WriteIntrinsics(self):
-		with open(self.model_path + "/cameras.txt") as cf:
+	def WriteIntrinsics(self, _group_path, _group):
+		_model_path = _group_path + "/model"
+		with open(_model_path + "/cameras.txt") as cf:
 			cfstr = cf.readlines()
 			#intr = cfstr[3].split(" ")
 			intr = re.split('[ \n]',cfstr[3])[:-1]
 			self.CreateDirIfnotExist(self.yml_path)
 
-			with open(self.yml_path + "/" + self.filename_yml, "wt") as fp:
+			_filename = self.yml_path + "/" + self.filename_yml + "_" + str(_group) + ".yml"
+
+			with open(_filename, "wt") as fp:
 				if fp is None:
-					print(self.yml_path + "/" + self.filename_yml+ "No such file or directry")
+					print(_filename+ "No such file or directry")
 				else:
 					fp.write("%YAML:1.0 #Generated by COLMAP\n")
 					fp.write("ImageSize: "+str([int(intr[2]), int(intr[3])]))
 
-			if os.path.isfile(self.yml_path + "/" + self.filename_yml):
-				fp=cv2.FileStorage(self.yml_path + "/" + self.filename_yml, flags=2)
+			if os.path.isfile(_filename):
+				fp=cv2.FileStorage(_filename, flags=2)
 				Extrinsic = np.identity(4)
 				CameraMat = np.identity(3)
 				CameraMat[0][0] = float(intr[4])
@@ -152,38 +170,44 @@ class colmap:
 				fp.write(name='ReprojectionError', val=0.0)
 				fp.release()
 
-			print("Output : " + self.yml_path + "/" + self.filename_yml)
+			print("Output : " + _filename)
 
-	def Sparse_reconstruction(self):
-		self.CreateDirIfnotExist("./tmp")
-		self.CreateDirIfnotExist("./tmp/sparse")
-		if not self.CheckImageDir():
-			return False
+	def Sparse_reconstruction(self, _group_path):
+		_database_path = _group_path+"/database.db"
+		_image_path = _group_path+"/images"
+		_sparse_path = _group_path+"/sparse"
 
-		feature_extract_cmd = "colmap feature_extractor --ImageReader.single_camera 1 --database_path ./tmp/database.db --ImageReader.camera_model OPENCV --image_path "+self.image_path
-		feature_matching_cmd = "colmap exhaustive_matcher --database_path ./tmp/database.db"
-		sparse_cmd = "colmap mapper --database_path ./tmp/database.db  --export_path ./tmp/sparse --image_path "+self.image_path
+		self.CreateDirIfnotExist(_sparse_path)
+
+		feature_extract_cmd = "colmap feature_extractor --ImageReader.single_camera 1 --database_path " + _database_path + " --ImageReader.camera_model OPENCV --image_path "+_image_path
+		feature_matching_cmd = "colmap exhaustive_matcher --database_path " + _database_path
+		sparse_cmd = "colmap mapper --database_path " + _database_path +  " --export_path "+_sparse_path+ " --image_path "+_image_path
 	
-		cmd = "rm -rf ./tmp/*.db ; rm -rfd ./tmp/sparse/* ; " + feature_extract_cmd + " ; " + feature_matching_cmd + " ; " + sparse_cmd
-
-		print(cmd)
+		cmd = feature_extract_cmd + " ; " + feature_matching_cmd + " ; " + sparse_cmd
 
 		subprocess.call(cmd, shell = True)
-		if os.path.isdir("./tmp/sparse/0"):
+		if os.path.isdir(_sparse_path+"/0"):
 			return True
 		else:
 			print("Failure : Sparse reconstruction")
 			return False
 
-	def Dense_reconstruction(self):
-		if not self.Sparse_reconstruction():
+	def Dense_reconstruction(self, _group_path):
+		if not self.Sparse_reconstruction(_group_path = _group_path):
 			return None
 
-		self.CreateDirIfnotExist("./tmp/dense")
-		undistorter_cmd = "colmap image_undistorter --input_path ./tmp/sparse/0 --output_path ./tmp/dense --output_type COLMAP --max_image_size 2000 --image_path " + self.image_path
-		stereo_cmd = "colmap dense_stereo --workspace_path ./tmp/dense --workspace_format COLMAP --DenseStereo.geom_consistency true"
-		fuser_cmd = "colmap dense_fuser --workspace_path ./tmp/dense --workspace_format COLMAP --input_type geometric --output_path ./model/fused.ply"
-		mesher_cmd = "colmap dense_mesher --input_path ./model/fused.ply --output_path ./model/meshed.ply"
+		_database_path = _group_path+"/database.db"
+		_image_path = _group_path+"/images"
+		_sparse_path = _group_path+"/sparce/0"
+		_dense_path = _group_path + "/dense"
+		_model_path = _group_path + "/model"
+
+		self.CreateDirIfnotExist(_dense_path)
+		self.CreateDirIfnotExist(_model_path)
+		undistorter_cmd = "colmap image_undistorter --input_path "+_sparse_path +" --output_path "+_dense_path+" --output_type COLMAP --max_image_size 2000 --image_path " + _image_path
+		stereo_cmd = "colmap dense_stereo --group_path "+_dense_path+" --workspace_format COLMAP --DenseStereo.geom_consistency true"
+		fuser_cmd = "colmap dense_fuser --workspace_path "+_dense_path+" --workspace_format COLMAP --input_type geometric --output_path "+_model_path+"/fused.ply"
+		mesher_cmd = "colmap dense_mesher --input_path "+_model_path+"/fused.ply --output_path "+_model_path+"/meshed.ply"
 
 		cmd = undistorter_cmd + " ; " + stereo_cmd + " ; " + fuser_cmd + " ; " + mesher_cmd
 	
@@ -193,18 +217,17 @@ class colmap:
 	def CreateDirIfnotExist(self,path):
 		if not os.path.isdir(path):
 			os.mkdir(path)
-
+	'''
 	def CheckImageDir(self):
 		if not os.path.isdir(self.image_path):
 			print("Cannot find image directory " + self.image_path)
 			return False
 		else:
 			return True
-
+	'''
 if __name__ == '__main__':
 	rospy.init_node('colmap_calib_node', anonymous=True)
 	colmap = colmap()
 	colmap.CheckColmapInstallation()
-	#colmap.WriteIntrinsics()
 	rospy.spin()
 
