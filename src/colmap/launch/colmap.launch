@@ -1,0 +1,13 @@
+<launch>
+	
+	<node pkg="colmap" name="colmap_calib_node" type="colmap_calib_node.py" output="screen">
+	<param name="dense" value="False"/>
+	<param name="workspace" value=".tmp_colmap"/>
+	<param name="image_num" value="50"/>
+	<param name="distance" value="2"/>
+	<param name="rotation" value="5"/>
+	<param name="yml_dir" value="./yml_colmap"/>
+	<param name="yml_name" value="camera_param_colmap.yaml"/>
+	</node>
+	
+</launch>
