@@ -30,81 +30,71 @@ class COLMAPCalib:
 		self.colmap.yml_path = rospy.get_param('~yml_dir', "./yml")
 		self.colmap.filename_yml = rospy.get_param('~yml_name', "camera_param.yml")
 
+		subprocess.call("mkdir -p "+self.workspace_path+" ; rm -rf "+self.workspace_path+"/* ; mkdir -p "+self.workspace_path+"/images_pool", shell = True)
+
+		self.pooled_image = 0
 		self.bridge = CvBridge()
-		self.cv_image = None
-		self.image_time = None
-		self.image_sub = rospy.Subscriber("/image_raw", Image, self.Image_graber)
-		subprocess.call("mkdir -p "+self.workspace_path, shell = True)
-		subprocess.call("rm -rf "+self.workspace_path+"/*", shell = True)
-		subprocess.call("mkdir -p "+self.workspace_path+"/images_pool", shell = True)
+		self.snap_point = None
+		self.image_sub = rospy.Subscriber("/image_raw", Image, self.Image_graber, queue_size = 10)
 		self.listener = tf.TransformListener()
-		self.flag_calibcheck = True
-		self.tf_th = threading.Thread(target=self.Tf_thread)
 		self.check_th = threading.Thread(target=self.Calib_Check)
-		self.tf_th.start()
 		self.check_th.start()
 
 	def Image_graber(self,image):
+		rot = 0
 		try:
-			self.cv_image = self.bridge.imgmsg_to_cv2(image,"bgr8")
-			self.image_time = image.header.stamp
+			cv_image = self.bridge.imgmsg_to_cv2(image,"bgr8")
+			image_time = image.header.stamp
+			self.listener.waitForTransform("/world", "/base_link", image_time, rospy.Duration(4.0))
+			(self.trans,rot) = self.listener.lookupTransform("/world", "/base_link", image_time)
+			if self.snap_point is None:
+				self.image_count = 0
+				self.distance = 0
+				euler = tf.transformations.euler_from_quaternion(rot)
+				self.snap_point = [np.array([0,0,0]),0]
+				self.snap_point[0] = np.array(self.trans)
+				self.snap_point[1] = euler[2]*180.0/math.pi
+			else:
+				yaw = (tf.transformations.euler_from_quaternion(rot))[2]*180.0/math.pi
+				rot = abs(yaw-self.snap_point[1])
+				distance = np.linalg.norm(np.array(self.trans)-self.snap_point[0])
+					
+				if (distance > self.snap_distance) or (rot > self.snap_rot):
+					self.snap_point = (np.array(self.trans),yaw)
+						
+					image_name = self.workspace_path+"/images_pool/" + str(self.image_count)+".jpg"
+					self.image_count += 1
+					self.pooled_image += 1
+					cv2.imwrite(image_name, cv_image)
+					show_image = cv2.resize(cv_image, (600, 480))
+					cv2.putText(show_image, "Save Image : "+image_name, (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0.0, 0.0, 255.0))
+					cv2.imshow('Image',show_image)
+					cv2.waitKey(1)
+
 		except CvBridgeError as e:
 			print(e)
- 
-	def Tf_thread(self):
-		initial = False;
-		image_count = 0
-		rot = 0
-		distance = 0
-		snap_point = [np.array([0,0,0]),0]
-
-		while not rospy.is_shutdown() and self.flag_calibcheck:
-			try:
-				if self.cv_image is not None:
-					(self.trans,rot) = self.listener.lookupTransform("/world", "/base_link", self.image_time)
-
-					if not initial:
-						euler = tf.transformations.euler_from_quaternion(rot)
-						snap_point[0] = np.array(self.trans)
-						snap_point[1] = euler[2]*180.0/math.pi
-						initial = True
-					else:
-						yaw = (tf.transformations.euler_from_quaternion(rot))[2]*180.0/math.pi
-						rot = abs(yaw-snap_point[1])
-						distance = np.linalg.norm(np.array(self.trans)-snap_point[0])
-					
-						if (distance > self.snap_distance) or (rot > self.snap_rot):
-							snap_point = (np.array(self.trans),yaw)
-						
-							image_name = self.workspace_path+"/images_pool/" + str(image_count)+".jpg"
-							image_count += 1
-							cv2.imwrite(image_name, self.cv_image)
-							show_image = cv2.resize(self.cv_image, (600, 480))
-							cv2.putText(show_image, "Save Image : "+image_name, (30, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0.0, 0.0, 255.0))
-							cv2.imshow('Image',show_image)
-							cv2.waitKey(1)
-
-			except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
-				continue
 
 	def Calib_Check(self):
 		image_group = 0
 		image_count = 0
-		while not rospy.is_shutdown() and self.flag_calibcheck:
+		flag_calibcheck = True
+
+		while not rospy.is_shutdown() and flag_calibcheck:
 			images = os.listdir(self.workspace_path+"/images_pool")
-			if len(images) > self.calib_image_num:
+			if self.pooled_image > self.calib_image_num:
 				image_pool_path = self.workspace_path+"/images_pool"
 				group_path = self.workspace_path+"/group"+str(image_group)
 				subprocess.call("mkdir -p "+group_path+"/images", shell = True)
 
+				print("Start Calibration")
 				for i in range(0, self.calib_image_num):
 					subprocess.call("mv "+image_pool_path+"/"+str(image_count)+".jpg "+group_path+"/images/", shell = True)
 					image_count +=1
+				self.pooled_image -= image_count
 
 				if self.CameraCalib(_group_path=group_path, _group=image_group):
 					cv2.destroyAllWindows()
-					self.flag_calibcheck = False
-					self.tf_th.join()
+					flag_calibcheck = False
 					subprocess.call("rm -rf "+image_pool_path, shell = True)
 				else:
 					self.calib_image_num += 10

@@ -51,7 +51,7 @@ class COLMAP:
 
 	def Dense_reconstruction(self, _group_path):
 		if not self.Sparse_reconstruction(_group_path = _group_path):
-			return None
+			return False
 
 		_database_path = _group_path+"/database.db"
 		_image_path = _group_path+"/images"
@@ -70,7 +70,7 @@ class COLMAP:
 		cmd = undistorter_cmd + " ; " + stereo_cmd + " ; " + fuser_cmd + " ; " + mesher_cmd
 	
 		subprocess.call(cmd, shell = True)
-		return None
+		return True
 
 	def WriteIntrinsics(self, _group_path):
 		_model_path = _group_path + "/model"
