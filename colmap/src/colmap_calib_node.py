@@ -35,41 +35,50 @@ class COLMAPCalib:
 		self.pooled_image = 0
 		self.bridge = CvBridge()
 		self.snap_point = None
-		self.image_sub = rospy.Subscriber("/image_raw", Image, self.Image_graber, queue_size = 10)
+		self.show_image = None
 		self.listener = tf.TransformListener()
+		self.image_sub = rospy.Subscriber("/image_raw", Image, self.Image_graber, queue_size = 10)
 		self.check_th = threading.Thread(target=self.Calib_Check)
 		self.check_th.start()
 
 	def Image_graber(self,image):
-		rot = 0
+		writing_image = False
+
 		try:
 			cv_image = self.bridge.imgmsg_to_cv2(image,"bgr8")
-			image_time = image.header.stamp
-			self.listener.waitForTransform("/world", "/base_link", image_time, rospy.Duration(4.0))
-			(self.trans,rot) = self.listener.lookupTransform("/world", "/base_link", image_time)
-			if self.snap_point is None:
-				self.image_count = 0
-				self.distance = 0
-				euler = tf.transformations.euler_from_quaternion(rot)
-				self.snap_point = [np.array([0,0,0]),0]
-				self.snap_point[0] = np.array(self.trans)
-				self.snap_point[1] = euler[2]*180.0/math.pi
-			else:
-				yaw = (tf.transformations.euler_from_quaternion(rot))[2]*180.0/math.pi
-				rot = abs(yaw-self.snap_point[1])
-				distance = np.linalg.norm(np.array(self.trans)-self.snap_point[0])
-					
-				if (distance > self.snap_distance) or (rot > self.snap_rot):
-					self.snap_point = (np.array(self.trans),yaw)
+			try:
+				
+				self.listener.waitForTransform("/world", "/base_link", image.header.stamp, rospy.Duration(1.0))
+				(trans,rot) = self.listener.lookupTransform("/world", "/base_link", image.header.stamp)
+				if self.snap_point is None:
+					self.image_count = 0
+					writing_image = True
+					self.snap_point = [np.array(trans), (tf.transformations.euler_from_quaternion(rot))[2]*180.0/math.pi]
+				else:
+					yaw = (tf.transformations.euler_from_quaternion(rot))[2]*180.0/math.pi
+					rot = abs(yaw-self.snap_point[1])
+					distance = np.linalg.norm(np.array(trans)-self.snap_point[0])
+				
+					if (distance > self.snap_distance) or (rot > self.snap_rot):
+						self.snap_point = (np.array(trans),yaw)
+						writing_image = True
 						
+				
+				if writing_image:
 					image_name = self.workspace_path+"/images_pool/" + str(self.image_count)+".jpg"
 					self.image_count += 1
 					self.pooled_image += 1
 					cv2.imwrite(image_name, cv_image)
-					show_image = cv2.resize(cv_image, (600, 480))
-					cv2.putText(show_image, "Save Image : "+image_name, (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0.0, 0.0, 255.0))
-					cv2.imshow('Image',show_image)
+					self.show_image = cv2.resize(cv_image, (600, 480))
+					cv2.putText(self.show_image, "Save Image : "+image_name, (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0.0, 0.0, 255.0))
+
+				if self.show_image is not None:
+					cv2.imshow('Image',self.show_image)
 					cv2.waitKey(1)
+
+			except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
+				pass
+				
 
 		except CvBridgeError as e:
 			print(e)
@@ -77,12 +86,10 @@ class COLMAPCalib:
 	def Calib_Check(self):
 		image_group = 0
 		image_count = 0
-		flag_calibcheck = True
+		image_pool_path = self.workspace_path+"/images_pool"
 
-		while not rospy.is_shutdown() and flag_calibcheck:
-			images = os.listdir(self.workspace_path+"/images_pool")
+		while not rospy.is_shutdown():
 			if self.pooled_image > self.calib_image_num:
-				image_pool_path = self.workspace_path+"/images_pool"
 				group_path = self.workspace_path+"/group"+str(image_group)
 				subprocess.call("mkdir -p "+group_path+"/images", shell = True)
 
@@ -94,8 +101,10 @@ class COLMAPCalib:
 
 				if self.CameraCalib(_group_path=group_path, _group=image_group):
 					cv2.destroyAllWindows()
-					flag_calibcheck = False
+					cv2.waitKey(1)
 					subprocess.call("rm -rf "+image_pool_path, shell = True)
+					self.image_sub.unregister()
+
 				else:
 					self.calib_image_num += 10
 					print("Modify : Distance = "+str(self.snap_distance)+" , Image num = "+str(self.calib_image_num))
@@ -124,8 +133,6 @@ class COLMAPCalib:
 		else:
 			print("Failure : CameraCalib")
 			return False
-
-	
 
 if __name__ == '__main__':
 	rospy.init_node('colmap_calib_node', anonymous=True)
