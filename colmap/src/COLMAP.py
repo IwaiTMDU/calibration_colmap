@@ -41,6 +41,8 @@ class COLMAP:
 
 		subprocess.call(cmd, shell = True)
 		if os.path.isdir(_sparse_path+"/0"):
+			fix_principal_cmd = "colmap bundle_adjuster --input_path "+_sparse_path+"/0 " + "--output_path "+_sparse_path+"/0"+" --BundleAdjustment.refine_principal_point 1"
+			subprocess.call(fix_principal_cmd, shell = True)
 			if os.path.isdir(_sparse_path+"/1"): #COLMAP presumes that the images are taken by several cameras.
 				print("The calibrated intrinsics might not be expected result")
 			

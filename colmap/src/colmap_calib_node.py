@@ -25,11 +25,11 @@ class COLMAPCalib:
 		self.parent_frame = rospy.get_param('~parent_frame', "/world")
 		self.child_frame = rospy.get_param('~child_frame', "/base_link")
 		self.dense = rospy.get_param('~dense', False)
-		self.workspace_path = rospy.get_param('~workspace', ".tmp_colmap")
+		self.workspace_path = rospy.get_param('~workspace', "./colmap/tmp")
 		self.calib_image_num = rospy.get_param('~image_num', 50)
 		self.snap_distance = rospy.get_param('~distance', 5)
 		self.snap_rot = rospy.get_param('~rotation', 5)
-		self.colmap.yml_path = rospy.get_param('~yml_dir', "./yml")
+		self.colmap.yml_path = rospy.get_param('~yml_dir', "./colmap/yml")
 		self.colmap.filename_yml = rospy.get_param('~yml_name', "camera_param.yml")
 
 		subprocess.call("mkdir -p "+self.workspace_path+" ; rm -rf "+self.workspace_path+"/* ; mkdir -p "+self.workspace_path+"/images_pool", shell = True)

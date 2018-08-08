@@ -22,9 +22,9 @@ Clone this repository into your catkin workspace.
 |'parent_frame'|*String*|The parent frame of the /tf. Default '/world'|
 |'child_frame'|*String*|The child frame of the /tf. Default '/base_link'|
 |'dense'|*bool*|If dense is True, dense reconstruction is executed after sparse reconstruction. Default 'False'|
-|'workspace'|*String*|COLMAP workspace. Default './tmp/colmap'|
+|'workspace'|*String*|COLMAP workspace. Default './colmap/tmp'|
 |'image_num'|*uint*|Number of images for calibration. Default '50'|
 |'distance'|*Double*|Interval of distance. Default '5' meters|
 |'rotation'|*Double*|Interval of yaw angle. Default '5' degree|
-|'yml_dir'|*String*|Path to output directory of yml file. Default './yml/colmap'|
+|'yml_dir'|*String*|Path to output directory of yml file. Default './colmap/yml'|
 |'yml_name'|*String*|yml file name. Default 'camera_param.yml'|

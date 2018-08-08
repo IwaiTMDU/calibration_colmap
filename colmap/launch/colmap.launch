@@ -5,11 +5,11 @@
 	<param name="parent_frame" value="/world"/>
 	<param name="child_frame" value="/base_link"/>
 	<param name="dense" value="False"/>
-	<param name="workspace" value="./tmp/colmap"/>
+	<param name="workspace" value="./colmap/tmp"/>
 	<param name="image_num" value="50"/>
 	<param name="distance" value="5"/>
 	<param name="rotation" value="5"/>
-	<param name="yml_dir" value="./yml/colmap"/>
+	<param name="yml_dir" value="./colmap/yml"/>
 	<param name="yml_name" value="camera_param.yaml"/>
 	</node>
 	
