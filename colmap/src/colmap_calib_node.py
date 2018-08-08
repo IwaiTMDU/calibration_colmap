@@ -27,7 +27,7 @@ class COLMAPCalib:
 		self.dense = rospy.get_param('~dense', False)
 		self.workspace_path = rospy.get_param('~workspace', ".tmp_colmap")
 		self.calib_image_num = rospy.get_param('~image_num', 50)
-		self.snap_distance = rospy.get_param('~distance', 1)
+		self.snap_distance = rospy.get_param('~distance', 5)
 		self.snap_rot = rospy.get_param('~rotation', 5)
 		self.colmap.yml_path = rospy.get_param('~yml_dir', "./yml")
 		self.colmap.filename_yml = rospy.get_param('~yml_name', "camera_param.yml")
