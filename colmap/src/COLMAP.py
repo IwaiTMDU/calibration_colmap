@@ -12,7 +12,7 @@ class COLMAP:
 		self.yml_path = "./yml_colmap"
 		self.filename_yml = "camera_param"
 
-	def CheckColmapInstallation(self):
+	def CheckColmapInstallation(self): #whether COLMAP is installed
 		cmd = "colmap -h"
 		try:
 			res = subprocess.check_output(cmd.split())
@@ -33,7 +33,7 @@ class COLMAP:
 
 		subprocess.call("mkdir -p "+_sparse_path, shell = True)
 
-		feature_extract_cmd = "colmap feature_extractor --ImageReader.single_camera 1 --database_path " + _database_path + " --ImageReader.camera_model OPENCV --image_path "+_image_path
+		feature_extract_cmd = "colmap feature_extractor --ImageReader.single_camera 1 --database_path " + _database_path + " --ImageReader.camera_model OPENCV --image_path "+_image_path #Number of camera : 1, camera model : OPENCV
 		feature_matching_cmd = "colmap exhaustive_matcher --database_path " + _database_path
 		sparse_cmd = "colmap mapper --database_path " + _database_path +  " --export_path "+_sparse_path+ " --image_path "+_image_path
 	
@@ -41,7 +41,7 @@ class COLMAP:
 
 		subprocess.call(cmd, shell = True)
 		if os.path.isdir(_sparse_path+"/0"):
-			if os.path.isdir(_sparse_path+"/1"):
+			if os.path.isdir(_sparse_path+"/1"): #COLMAP presumes that the images are taken by several cameras.
 				print("The calibrated intrinsics might not be expected result")
 			
 			return True
@@ -62,7 +62,7 @@ class COLMAP:
 		subprocess.call("mkdir -p "+_dense_path, shell = True)
 		subprocess.call("mkdir -p "+_model_path, shell = True)
 
-		undistorter_cmd = "colmap image_undistorter --input_path "+_sparse_path +" --output_path "+_dense_path+" --output_type COLMAP --max_image_size 2000 --image_path " + _image_path
+		undistorter_cmd = "colmap image_undistorter --input_path "+_sparse_path +" --output_path "+_dense_path+" --output_type COLMAP --max_image_size 5000 --image_path " + _image_path
 		stereo_cmd = "colmap dense_stereo --workspace_path "+_dense_path+" --workspace_format COLMAP --DenseStereo.geom_consistency true"
 		fuser_cmd = "colmap dense_fuser --workspace_path "+_dense_path+" --workspace_format COLMAP --input_type geometric --output_path "+_model_path+"/fused.ply"
 		mesher_cmd = "colmap dense_mesher --input_path "+_model_path+"/fused.ply --output_path "+_model_path+"/meshed.ply"
@@ -72,7 +72,7 @@ class COLMAP:
 		subprocess.call(cmd, shell = True)
 		return True
 
-	def WriteIntrinsics(self, _group_path):
+	def WriteIntrinsics(self, _group_path):# write yml file
 		_model_path = _group_path + "/model"
 		with open(_model_path + "/cameras.txt") as cf:
 			cfstr = cf.readlines()
@@ -101,10 +101,10 @@ class COLMAP:
 				CameraMat[1][1] = float(intr[5])
 				CameraMat[1][2] = float(intr[7])
 				DistCoeff = np.matrix(np.array(list(map(lambda value:float(value), intr[8:]))))
-				fp.write(name='CameraExtrinsicMat',val=Extrinsic)
+				fp.write(name='CameraExtrinsicMat',val=Extrinsic) #Identity matrix
 				fp.write(name='CameraMat',val=CameraMat)
 				fp.write(name='DistCoeff',val=DistCoeff)
-				fp.write(name='ReprojectionError', val=0.0)
+				fp.write(name='ReprojectionError', val=0.0) #assuming it 0.0 
 				fp.release()
 
 			print("Output : " + _filename)

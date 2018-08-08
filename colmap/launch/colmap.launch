@@ -1,10 +1,13 @@
 <launch>
 	
 	<node pkg="colmap" name="colmap_calib_node" type="colmap_calib_node.py" output="screen">
+	<param name="image" value="/image_raw"/>
+	<param name="parent_frame" value="/world"/>
+	<param name="child_frame" value="/base_link"/>
 	<param name="dense" value="False"/>
 	<param name="workspace" value="./tmp/colmap"/>
-	<param name="image_num" value="40"/>
-	<param name="distance" value="2"/>
+	<param name="image_num" value="50"/>
+	<param name="distance" value="5"/>
 	<param name="rotation" value="5"/>
 	<param name="yml_dir" value="./yml/colmap"/>
 	<param name="yml_name" value="camera_param.yaml"/>

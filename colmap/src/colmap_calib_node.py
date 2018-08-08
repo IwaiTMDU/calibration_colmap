@@ -12,19 +12,21 @@ from COLMAP import COLMAP
 from sensor_msgs.msg import Image
 from collections import OrderedDict
 import tf
-from geometry_msgs.msg import Vector3
-from geometry_msgs.msg import Quaternion
+
+
 from cv_bridge import CvBridge, CvBridgeError
 
 class COLMAPCalib:
-
 	def __init__(self):
 		self.colmap = COLMAP()
 		self.colmap.CheckColmapInstallation()
 
+		sub_image = rospy.get_param('~image', "/image_raw")
+		self.parent_frame = rospy.get_param('~parent_frame', "/world")
+		self.child_frame = rospy.get_param('~child_frame', "/base_link")
 		self.dense = rospy.get_param('~dense', False)
 		self.workspace_path = rospy.get_param('~workspace', ".tmp_colmap")
-		self.calib_image_num = rospy.get_param('~image_num', 100)
+		self.calib_image_num = rospy.get_param('~image_num', 50)
 		self.snap_distance = rospy.get_param('~distance', 1)
 		self.snap_rot = rospy.get_param('~rotation', 5)
 		self.colmap.yml_path = rospy.get_param('~yml_dir', "./yml")
@@ -36,61 +38,64 @@ class COLMAPCalib:
 		self.bridge = CvBridge()
 		self.snap_point = None
 		self.show_image = None
+		
 		self.listener = tf.TransformListener()
-		self.image_sub = rospy.Subscriber("/image_raw", Image, self.Image_graber, queue_size = 10)
+		self.image_sub = rospy.Subscriber(sub_image, Image, self.Image_graber, queue_size = 10)
 		self.check_th = threading.Thread(target=self.Calib_Check)
 		self.check_th.start()
 
-	def Image_graber(self,image):
-		writing_image = False
+	def Image_graber(self,image): #callback
+		writing_image = False	
 
 		try:
 			cv_image = self.bridge.imgmsg_to_cv2(image,"bgr8")
 			try:
 				
-				self.listener.waitForTransform("/world", "/base_link", image.header.stamp, rospy.Duration(1.0))
-				(trans,rot) = self.listener.lookupTransform("/world", "/base_link", image.header.stamp)
-				if self.snap_point is None:
+				self.listener.waitForTransform(self.child_frame, self.parent_frame, image.header.stamp, rospy.Duration(1.0))
+				(trans,q) = self.listener.lookupTransform(self.child_frame, self.parent_frame, image.header.stamp)
+
+				if self.snap_point is None: #initial
 					self.image_count = 0
 					writing_image = True
-					self.snap_point = [np.array(trans), (tf.transformations.euler_from_quaternion(rot))[2]*180.0/math.pi]
+					self.snap_point = [np.array(trans), tf.transformations.quaternion_conjugate(q)]
+					
 				else:
-					yaw = (tf.transformations.euler_from_quaternion(rot))[2]*180.0/math.pi
-					rot = abs(yaw-self.snap_point[1])
+					_q = tf.transformations.quaternion_multiply(self.snap_point[1], q)
+					yaw = math.degrees((tf.transformations.euler_from_quaternion(_q))[2])
 					distance = np.linalg.norm(np.array(trans)-self.snap_point[0])
 				
-					if (distance > self.snap_distance) or (rot > self.snap_rot):
-						self.snap_point = (np.array(trans),yaw)
+					if (distance > self.snap_distance) or (abs(yaw) > self.snap_rot):
 						writing_image = True
+						self.snap_point = [np.array(trans), tf.transformations.quaternion_conjugate(q)]
 						
 				
-				if writing_image:
+				if writing_image: #save an image
 					image_name = self.workspace_path+"/images_pool/" + str(self.image_count)+".jpg"
 					self.image_count += 1
 					self.pooled_image += 1
 					cv2.imwrite(image_name, cv_image)
 					self.show_image = cv2.resize(cv_image, (600, 480))
 					cv2.putText(self.show_image, "Save Image : "+image_name, (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0.0, 0.0, 255.0))
-
-				if self.show_image is not None:
-					cv2.imshow('Image',self.show_image)
-					cv2.waitKey(1)
-
+		
 			except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
 				pass
+
+			if self.show_image is not None: #display saved image
+				cv2.imshow('COLMAP',self.show_image)
+				cv2.waitKey(1)
 				
 
 		except CvBridgeError as e:
 			print(e)
 
-	def Calib_Check(self):
-		image_group = 0
+	def Calib_Check(self): #thread
 		image_count = 0
 		image_pool_path = self.workspace_path+"/images_pool"
 
 		while not rospy.is_shutdown():
+
 			if self.pooled_image > self.calib_image_num:
-				group_path = self.workspace_path+"/group"+str(image_group)
+				group_path = self.workspace_path+"/group"
 				subprocess.call("mkdir -p "+group_path+"/images", shell = True)
 
 				print("Start Calibration")
@@ -99,19 +104,20 @@ class COLMAPCalib:
 					image_count +=1
 				self.pooled_image -= image_count
 
-				if self.CameraCalib(_group_path=group_path, _group=image_group):
-					cv2.destroyAllWindows()
-					cv2.waitKey(1)
-					subprocess.call("rm -rf "+image_pool_path, shell = True)
-					self.image_sub.unregister()
+				if self.CameraCalib(_group_path=group_path): #Calibration : Success
+					break
 
-				else:
+				else:															 #Calibration : Failure
 					self.calib_image_num += 10
-					print("Modify : Distance = "+str(self.snap_distance)+" , Image num = "+str(self.calib_image_num))
-					image_group += 1
+					subprocess.call("rm -rf "+group_path, shell = True)
+					print("Modify : Image num = "+str(self.calib_image_num))
+
+		subprocess.call("rm -rf "+image_pool_path, shell = True)
+		self.image_sub.unregister()
+		cv2.destroyWindow('COLMAP')
 			
 
-	def CameraCalib(self, _group_path, _group):
+	def CameraCalib(self, _group_path): #Calibration method
 		subprocess.call("rm -rf "+_group_path+"/*.db ; rm -rfd "+_group_path+"/sparse/*", shell = True)
 
 		if self.colmap.Sparse_reconstruction(_group_path = _group_path):
