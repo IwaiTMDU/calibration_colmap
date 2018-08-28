@@ -11,6 +11,7 @@ class COLMAP:
 	def __init__(self):
 		self.yml_path = "./yml_colmap"
 		self.filename_yml = "camera_param"
+		self.max_feature_num = 10000
 
 	def CheckColmapInstallation(self): #whether COLMAP is installed
 		cmd = "colmap -h"
@@ -30,10 +31,12 @@ class COLMAP:
 		_database_path = _group_path+"/database.db"
 		_image_path = _group_path+"/images"
 		_sparse_path = _group_path+"/sparse"
+		_model_path = _group_path + "/model"
 
 		subprocess.call("mkdir -p "+_sparse_path, shell = True)
+		subprocess.call("mkdir -p "+_model_path, shell = True)
 
-		feature_extract_cmd = "colmap feature_extractor --ImageReader.single_camera 1 --database_path " + _database_path + " --ImageReader.camera_model OPENCV --image_path "+_image_path #Number of camera : 1, camera model : OPENCV
+		feature_extract_cmd = "colmap feature_extractor --ImageReader.single_camera 1 --database_path " + _database_path + " --ImageReader.camera_model OPENCV --image_path "+_image_path + " --SiftExtraction.max_num_features " + str(self.max_feature_num) #Number of camera : 1, camera model : OPENCV
 		feature_matching_cmd = "colmap exhaustive_matcher --database_path " + _database_path
 		sparse_cmd = "colmap mapper --database_path " + _database_path +  " --export_path "+_sparse_path+ " --image_path "+_image_path
 	
@@ -41,11 +44,17 @@ class COLMAP:
 
 		subprocess.call(cmd, shell = True)
 		if os.path.isdir(_sparse_path+"/0"):
+			if os.path.isdir(_sparse_path+"/1"): #COLMAP presumes that the images are taken by several cameras.
+				merge_cmd = "colmap model_merger --input_path1 "+_sparse_path+"/0 --input_path2 "+_sparse_path+"/1 --output_path "+_sparse_path+"/0"
+				subprocess.call(merge_cmd, shell = True)
 			fix_principal_cmd = "colmap bundle_adjuster --input_path "+_sparse_path+"/0 " + "--output_path "+_sparse_path+"/0"+" --BundleAdjustment.refine_principal_point 1"
 			subprocess.call(fix_principal_cmd, shell = True)
-			if os.path.isdir(_sparse_path+"/1"): #COLMAP presumes that the images are taken by several cameras.
-				print("The calibrated intrinsics might not be expected result")
-			
+			rm_cmd = "rm -rf " + _model_path + "/*"
+			subprocess.call(rm_cmd, shell = True)
+			txt_cmd = "colmap model_converter --input_path "+_sparse_path+"/0 --output_type 'TXT' --output_path " + _model_path
+			subprocess.call(txt_cmd, shell = True)
+			ply_cmd = "colmap model_converter --input_path "+_sparse_path+"/0 --output_type 'PLY' --output_path " + _model_path+"/sparse.ply"
+			subprocess.call(ply_cmd, shell = True)
 			return True
 		else:
 			print("Failure : Sparse reconstruction")
@@ -66,8 +75,8 @@ class COLMAP:
 
 		undistorter_cmd = "colmap image_undistorter --input_path "+_sparse_path +" --output_path "+_dense_path+" --output_type COLMAP --max_image_size 5000 --image_path " + _image_path
 		stereo_cmd = "colmap dense_stereo --workspace_path "+_dense_path+" --workspace_format COLMAP --DenseStereo.geom_consistency true"
-		fuser_cmd = "colmap dense_fuser --workspace_path "+_dense_path+" --workspace_format COLMAP --input_type geometric --output_path "+_model_path+"/fused.ply"
-		mesher_cmd = "colmap dense_mesher --input_path "+_model_path+"/fused.ply --output_path "+_model_path+"/meshed.ply"
+		fuser_cmd = "colmap dense_fuser --workspace_path "+_dense_path+" --workspace_format COLMAP --input_type geometric --output_path "+_model_path+"/dense.ply"
+		mesher_cmd = "colmap dense_mesher --input_path "+_model_path+"/dense.ply --output_path "+_model_path+"/dense.ply"
 
 		cmd = undistorter_cmd + " ; " + stereo_cmd + " ; " + fuser_cmd + " ; " + mesher_cmd
 	

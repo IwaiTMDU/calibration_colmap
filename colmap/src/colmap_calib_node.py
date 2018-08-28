@@ -84,7 +84,6 @@ class COLMAPCalib:
 				cv2.imshow('COLMAP',self.show_image)
 				cv2.waitKey(1)
 				
-
 		except CvBridgeError as e:
 			print(e)
 
@@ -108,7 +107,7 @@ class COLMAPCalib:
 					break
 
 				else:															 #Calibration : Failure
-					self.calib_image_num += 10
+					self.calib_image_num = int(self.calib_image_num*1.5)
 					subprocess.call("rm -rf "+group_path, shell = True)
 					print("Modify : Image num = "+str(self.calib_image_num))
 
@@ -121,19 +120,11 @@ class COLMAPCalib:
 		subprocess.call("rm -rf "+_group_path+"/*.db ; rm -rfd "+_group_path+"/sparse/*", shell = True)
 
 		if self.colmap.Sparse_reconstruction(_group_path = _group_path):
-			_sparse_path = _group_path+"/sparse/0"
-			_model_path = _group_path + "/model"
-			subprocess.call("mkdir -p "+_model_path, shell = True)
-			rm_cmd = "rm -rf " + _model_path + "/*"
-			subprocess.call(rm_cmd, shell = True)
-			txt_cmd = "colmap model_converter --input_path "+_sparse_path+" --output_type 'TXT' --output_path " + _model_path
-			subprocess.call(txt_cmd, shell = True)
 			self.colmap.WriteIntrinsics(_group_path = _group_path)
 
 			print("Success : CameraCalib")
 			if self.dense:
 				self.colmap.Dense_reconstruction(_group_path = _group_path)
-				print("Carried out : Dense reconstruction")
 			return True
 
 		else:
